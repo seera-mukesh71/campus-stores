@@ -287,6 +287,28 @@ body > main {
 #campus-stores .summary {
   margin-top: 8px;
 }
+#campus-stores .form label.check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+#campus-stores .form label.check input {
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  flex: none;
+}
+#campus-stores .form label.check span {
+  margin: 0;
+}
+#campus-stores .formerror {
+  color: var(--mark);
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+#campus-stores .formerror:empty {
+  display: none;
+}
 #campus-stores .inlineform {
   border-left: 3px solid var(--sel);
   background: var(--desk);

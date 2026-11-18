@@ -131,6 +131,8 @@
     notes: [],
     editing: false,
     handoff: null, // slip number whose "Update holder / promise" form is open
+    confirming: null, // slip number whose return-confirm panel is open
+    formError: "", // message shown inside the open form (role="alert")
     onlyOpen: true,
     notice: "Sample shift · All records are fictional.",
   });
@@ -260,6 +262,43 @@
       ) +
       '</select></label></div><div class="buttons"><button type="submit" class="primary">Save holder / promise</button>' +
       btn("Cancel", "handoff-cancel") +
+      "</div></form>"
+    );
+  }
+  const formError = () =>
+    '<p role="alert" class="formerror" data-formerror>' +
+    esc(s.formError) +
+    "</p>";
+  // Inline confirm panel: make the attendant check the physical unit
+  // (model + bin) and say who brought it back before the slip closes.
+  function returnForm(l) {
+    const a = getAsset(l.asset);
+    return (
+      '<form data-return data-num="' +
+      l.num +
+      '" class="inlineform"><p><b>Close L-' +
+      l.num +
+      " · " +
+      esc(a.id) +
+      "</b> — " +
+      esc(a.model) +
+      " · bin " +
+      esc(a.bin) +
+      " · now with " +
+      esc(l.holder) +
+      '</p><div class="form"><label><span>Returned by</span><select name="by">' +
+      opts(
+        people.map((p) => [p, p]),
+        l.holder,
+      ) +
+      '</select></label><label class="check full"><input type="checkbox" name="inhand" /><span>This is the unit in my hand (' +
+      esc(a.model) +
+      ", bin " +
+      esc(a.bin) +
+      ")</span></label></div>" +
+      formError() +
+      '<div class="buttons"><button type="submit" class="primary">Confirm return</button>' +
+      btn("Cancel", "return-cancel") +
       "</div></form>"
     );
   }
@@ -491,6 +530,7 @@
             btn("Record return", "return", String(l.num))) +
         "</div></div>";
       if (!l.back && s.handoff === l.num) html += handoffForm(l);
+      if (!l.back && s.confirming === l.num) html += returnForm(l);
     }
     return html;
   }
@@ -579,6 +619,7 @@
     const b = e.target.closest("[data-action]");
     if (!b) return;
     const v = b.dataset.val;
+    s.formError = "";
     switch (b.dataset.action) {
       case "restart":
         s = original();
@@ -591,9 +632,14 @@
         s.tab = v;
         s.editing = false;
         s.handoff = null;
+        s.confirming = null;
         break;
       case "handoff":
         s.handoff = Number(v);
+        s.confirming = null;
+        break;
+      case "return-cancel":
+        s.confirming = null;
         break;
       case "handoff-cancel":
         s.handoff = null;
@@ -614,13 +660,11 @@
         s.onlyOpen = v === "0";
         break;
       case "return": {
+        // Opens the confirm panel; nothing closes until it is confirmed.
         const l = s.loans.find((l) => l.num === Number(v));
         if (!l || l.back) return;
-        l.back = true;
-        l.returnedBy = l.holder;
-        l.returnedAt = shifts[s.phase].time;
-        if (s.handoff === l.num) s.handoff = null;
-        s.notice = l.asset + " returned to stock. Slip L-" + l.num + " closed.";
+        s.confirming = l.num;
+        s.handoff = null;
         break;
       }
     }
@@ -632,6 +676,11 @@
       commit();
     }
   });
+  // Show a validation problem inside the open form and in the status bar.
+  function fail(msg) {
+    s.formError = msg;
+    commit(msg);
+  }
   root.addEventListener("submit", (e) => {
     e.preventDefault();
     const f = e.target;
@@ -641,6 +690,38 @@
       if (!text) return;
       s.notes.push({ phase: s.phase, text, loanNum: null });
       commit("Handover note saved.");
+      return;
+    }
+    if (f.matches("[data-return]")) {
+      const l = s.loans.find((x) => x.num === Number(f.dataset.num) && !x.back);
+      if (!l) return fail("This slip is already closed.");
+      const a = getAsset(l.asset);
+      const by = form.get("by");
+      if (!isPerson(by)) return fail("Choose who brought the unit back.");
+      if (form.get("inhand") !== "on")
+        return fail(
+          "Check the unit in your hand is " +
+            a.model +
+            " from bin " +
+            a.bin +
+            " before closing L-" +
+            l.num +
+            ".",
+        );
+      l.back = true;
+      l.returnedBy = by;
+      l.returnedAt = shifts[s.phase].time;
+      s.confirming = null;
+      commit(
+        a.id +
+          " (" +
+          a.model +
+          ") returned by " +
+          by +
+          ". Slip L-" +
+          l.num +
+          " closed.",
+      );
       return;
     }
     if (f.matches("[data-handoff]")) {
