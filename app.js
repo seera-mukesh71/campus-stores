@@ -475,6 +475,71 @@
   // Return-by choices: never later than the request allows.
   const duesFor = (r) =>
     r ? dueLabels.filter((d) => dueMinutes(d) <= dueMinutes(r.due)) : dueLabels;
+  // Create one slip; returns its number.
+  function issueLoan(r, unit, who, due) {
+    const num = Math.max(400, ...s.loans.map((l) => l.num)) + 1;
+    s.loans.push({
+      num,
+      req: r.id,
+      asset: unit.id,
+      who,
+      due,
+      back: false,
+      holder: who,
+      promised: null,
+      returnedBy: null,
+      returnedAt: null,
+    });
+    return num;
+  }
+  // One slip per never-issued approved type, first available unit of each.
+  // Returns a status message, or sets s.formError and returns "".
+  function issueAll() {
+    const d = s.draft;
+    const r = getReq(d.req);
+    if (!r) return setFormError("Choose the approved request first.");
+    if (!isPerson(d.who))
+      return setFormError("Choose who is collecting first.");
+    const due = d.due || r.due;
+    if (!isDue(due) || dueMinutes(due) > dueMinutes(r.due))
+      return setFormError("Choose a return time no later than " + r.due + ".");
+    const picked = [];
+    const missing = [];
+    for (const type of remainingFor(r)) {
+      const unit = unitsFor(r).find((a) => a.type === type);
+      if (!unit) {
+        missing.push(type);
+        continue;
+      }
+      const num = issueLoan(r, unit, d.who, due);
+      picked.push(
+        "L-" + num + " " + unit.id + " (" + unit.model + ", bin " + unit.bin + ")",
+      );
+    }
+    if (!picked.length)
+      return setFormError("No unit on the shelf for: " + missing.join(", ") + ".");
+    s.editing = false;
+    s.draft = blankDraft();
+    return (
+      "Issued " +
+      picked.length +
+      " slip" +
+      (picked.length > 1 ? "s" : "") +
+      " to " +
+      d.who +
+      ", due " +
+      due +
+      ": " +
+      picked.join(", ") +
+      "." +
+      (missing.length ? " None on the shelf for: " + missing.join(", ") + "." : "")
+    );
+  }
+  function setFormError(msg) {
+    s.formError = msg;
+    s.notice = msg;
+    return "";
+  }
   function issueForm() {
     const d = s.draft;
     const r = getReq(d.req);
@@ -530,7 +595,16 @@
       ) +
       "</div>" +
       formError() +
-      '<div class="buttons"><button type="submit" class="primary">Save issue slip</button></div></form>';
+      '<div class="buttons"><button type="submit" class="primary">Save issue slip</button>' +
+      (r && remainingFor(r).length
+        ? btn(
+            "Issue all remaining approved items (" + remainingFor(r).length + ")",
+            "issue-all",
+            "",
+            "primary",
+          )
+        : "") +
+      "</div></form>";
     return html;
   }
   function register() {
@@ -737,6 +811,11 @@
         s.editing = false;
         s.draft = blankDraft();
         break;
+      case "issue-all": {
+        const msg = issueAll();
+        if (msg) s.notice = msg;
+        break;
+      }
       case "scope":
         s.onlyOpen = v === "0";
         break;
@@ -862,20 +941,9 @@
         "The approved quantity of this equipment type is already on loan.";
       return;
     }
-    const num = Math.max(400, ...s.loans.map((l) => l.num)) + 1;
-    s.loans.push({
-      num,
-      req,
-      asset,
-      who,
-      due,
-      back: false,
-      holder: who,
-      promised: null,
-      returnedBy: null,
-      returnedAt: null,
-    });
+    const num = issueLoan(r, unit, who, due);
     s.editing = false;
+    s.draft = blankDraft();
     commit("Issued " + asset + " to " + who + " on slip L-" + num + ".");
   });
   // Turn a v1 saved shift into v2 shape. Validation happens afterwards in restore().
