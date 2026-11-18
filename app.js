@@ -375,7 +375,7 @@
         .map((r) =>
           row(
             r.event,
-            r.id + " · " + r.club,
+            r.id + " · " + r.club + " · " + fulfilment(r, false),
             btn("View form", "request", r.id),
           ),
         )
