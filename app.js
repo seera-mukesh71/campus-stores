@@ -151,6 +151,9 @@
   };
   // Open and past the time it should be back (the promise, if one was made).
   // Exactly on time is "due now", not overdue.
+  // A slip closed during the current shift can still be reopened.
+  const canUndo = (loan) =>
+    loan.back && loan.returnedAt === shifts[s.phase].time;
   const isOverdue = (loan) =>
     !loan.back && nowMinutes() > dueMinutes(loan.promised || loan.due);
   // Late against the ORIGINAL due time: at return, or now if still open.
@@ -506,11 +509,13 @@
         )
         .join("") +
       "</div>";
+    // "Outstanding" also keeps slips closed this shift, so Undo stays reachable.
     const shown = s.loans
-      .filter((l) => !s.onlyOpen || !l.back)
+      .filter((l) => !s.onlyOpen || !l.back || canUndo(l))
       .slice()
       .reverse();
-    if (!shown.length) html += "<p>No outstanding slips.</p>";
+    if (s.onlyOpen && !s.loans.some((l) => !l.back))
+      html += "<p>No outstanding slips.</p>";
     for (const l of shown) {
       const [text, kind] = loanStatus(l);
       html +=
@@ -525,7 +530,9 @@
         '</div><div class="rowend">' +
         badge(text, kind) +
         (l.back
-          ? ""
+          ? canUndo(l)
+            ? btn("Undo return", "undo", String(l.num))
+            : ""
           : btn("Update holder / promise", "handoff", String(l.num)) +
             btn("Record return", "return", String(l.num))) +
         "</div></div>";
@@ -641,6 +648,30 @@
       case "return-cancel":
         s.confirming = null;
         break;
+      case "undo": {
+        const l = s.loans.find((l) => l.num === Number(v));
+        if (!l || !canUndo(l)) {
+          s.notice = "This return can no longer be undone.";
+          break;
+        }
+        if (out(l.asset)) {
+          s.notice =
+            "Cannot reopen L-" + l.num + ": " + l.asset + " is on another slip.";
+          break;
+        }
+        l.back = false;
+        l.returnedBy = null;
+        l.returnedAt = null;
+        s.notice =
+          "Slip L-" +
+          l.num +
+          " reopened. " +
+          l.asset +
+          " is on loan to " +
+          l.holder +
+          " again.";
+        break;
+      }
       case "handoff-cancel":
         s.handoff = null;
         break;
@@ -720,7 +751,7 @@
           by +
           ". Slip L-" +
           l.num +
-          " closed.",
+          " closed. Undo available.",
       );
       return;
     }
