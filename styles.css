@@ -263,6 +263,22 @@ body > main {
   background: var(--ok);
   color: var(--oktxt);
 }
+#campus-stores .warn {
+  background: var(--memo);
+  color: var(--memotxt);
+}
+#campus-stores .bad {
+  background: var(--mark);
+  color: var(--paper);
+  font-weight: 600;
+}
+#campus-stores .rowend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
 #campus-stores .record {
   margin-top: 14px;
   padding: 12px 13px;

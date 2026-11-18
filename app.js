@@ -197,8 +197,43 @@
     "</small></div><div>" +
     right +
     "</div></div>";
-  const badge = (t, good = false) =>
-    '<span class="tag' + (good ? " good" : "") + '">' + esc(t) + "</span>";
+  // kind: "" (neutral), "good", "warn" or "bad". The text always says the
+  // status in words, so colour is never the only signal.
+  const badge = (t, kind = "") =>
+    '<span class="tag' + (kind ? " " + kind : "") + '">' + esc(t) + "</span>";
+  // Badge text + kind for a slip.
+  function loanStatus(l) {
+    if (l.back) return wasLate(l) ? ["Returned late", "warn"] : ["Returned", ""];
+    if (isOverdue(l) || wasLate(l)) return ["Overdue", "bad"];
+    if (dueMinutes(l.promised || l.due) - nowMinutes() <= 60)
+      return ["Due soon", "warn"];
+    return ["Out", ""];
+  }
+  // Plain-language lines describing a slip: what, for whom, where it is now.
+  function loanLines(l) {
+    const r = getReq(l.req);
+    const lines = [
+      "For " + r.id + " · " + r.club + " · collected by " + l.who,
+    ];
+    if (l.back) {
+      lines.push(
+        l.returnedBy
+          ? "Returned by " + l.returnedBy + " · " + l.returnedAt
+          : "Returned (time not recorded)",
+      );
+    } else {
+      lines.push((wasLate(l) ? "Was due " : "Due ") + l.due);
+      if (l.holder !== l.who || l.promised)
+        lines.push(
+          "With " + l.holder + (l.promised ? " · promised " + l.promised : ""),
+        );
+    }
+    return lines;
+  }
+  function loanTitle(l) {
+    const a = getAsset(l.asset);
+    return "L-" + l.num + " · " + a.id + " · " + a.model + " · bin " + a.bin;
+  }
   function requestPage() {
     let html = head(
       "Approved requests",
@@ -256,7 +291,7 @@
       html += row(
         a.id + " · " + a.type,
         a.model + " · " + a.bin,
-        badge(status, status === "On shelf"),
+        badge(status, status === "On shelf" ? "good" : ""),
       );
     }
     return html;
@@ -325,14 +360,22 @@
       .slice()
       .reverse();
     if (!shown.length) html += "<p>No outstanding slips.</p>";
-    for (const l of shown)
-      html += row(
-        "L-" + l.num + " · " + l.asset,
-        l.req + " · " + l.who + " · Due " + l.due,
-        l.back
-          ? badge("Returned")
-          : btn("Record return", "return", String(l.num)),
-      );
+    for (const l of shown) {
+      const [text, kind] = loanStatus(l);
+      html +=
+        '<div class="row" data-loan="' +
+        l.num +
+        '"><div><strong>' +
+        esc(loanTitle(l)) +
+        "</strong>" +
+        loanLines(l)
+          .map((x) => "<small>" + esc(x) + "</small>")
+          .join("") +
+        '</div><div class="rowend">' +
+        badge(text, kind) +
+        (l.back ? "" : btn("Record return", "return", String(l.num))) +
+        "</div></div>";
+    }
     return html;
   }
   function deskbook() {
