@@ -560,7 +560,7 @@
     if (f.matches("[data-note]")) {
       const text = String(form.get("note")).trim();
       if (!text) return;
-      s.notes.push({ phase: s.phase, text });
+      s.notes.push({ phase: s.phase, text, loanNum: null });
       commit("Handover note saved.");
       return;
     }
