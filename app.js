@@ -130,6 +130,7 @@
     ],
     notes: [],
     editing: false,
+    handoff: null, // slip number whose "Update holder / promise" form is open
     onlyOpen: true,
     notice: "Sample shift · All records are fictional.",
   });
@@ -167,9 +168,18 @@
           "'": "&#39;",
         })[c],
     );
-  const opts = (list) =>
+  const opts = (list, selected = null) =>
     list
-      .map(([v, t]) => '<option value="' + esc(v) + '">' + esc(t) + "</option>")
+      .map(
+        ([v, t]) =>
+          '<option value="' +
+          esc(v) +
+          '"' +
+          (v === selected ? " selected" : "") +
+          ">" +
+          esc(t) +
+          "</option>",
+      )
       .join("");
   const btn = (label, act, val = "", style = "") =>
     '<button type="button" data-action="' +
@@ -229,6 +239,29 @@
         );
     }
     return lines;
+  }
+  // Inline form: who has the unit now, and when they promised to bring it.
+  function handoffForm(l) {
+    const later = dueLabels.filter((d) => dueMinutes(d) >= nowMinutes());
+    return (
+      '<form data-handoff data-num="' +
+      l.num +
+      '" class="inlineform"><div class="form"><label><span>Now held by</span><select name="holder" required>' +
+      opts(
+        people.map((p) => [p, p]),
+        l.holder,
+      ) +
+      '</select></label><label><span>Promised back</span><select name="promised">' +
+      opts(
+        [["", "No new promise (due " + l.due + ")"]].concat(
+          later.map((d) => [d, d]),
+        ),
+        l.promised || "",
+      ) +
+      '</select></label></div><div class="buttons"><button type="submit" class="primary">Save holder / promise</button>' +
+      btn("Cancel", "handoff-cancel") +
+      "</div></form>"
+    );
   }
   function loanTitle(l) {
     const a = getAsset(l.asset);
@@ -373,8 +406,12 @@
           .join("") +
         '</div><div class="rowend">' +
         badge(text, kind) +
-        (l.back ? "" : btn("Record return", "return", String(l.num))) +
+        (l.back
+          ? ""
+          : btn("Update holder / promise", "handoff", String(l.num)) +
+            btn("Record return", "return", String(l.num))) +
         "</div></div>";
+      if (!l.back && s.handoff === l.num) html += handoffForm(l);
     }
     return html;
   }
@@ -474,6 +511,13 @@
       case "tab":
         s.tab = v;
         s.editing = false;
+        s.handoff = null;
+        break;
+      case "handoff":
+        s.handoff = Number(v);
+        break;
+      case "handoff-cancel":
+        s.handoff = null;
         break;
       case "close":
         s.selected = "";
@@ -496,6 +540,7 @@
         l.back = true;
         l.returnedBy = l.holder;
         l.returnedAt = shifts[s.phase].time;
+        if (s.handoff === l.num) s.handoff = null;
         s.notice = l.asset + " returned to stock. Slip L-" + l.num + " closed.";
         break;
       }
@@ -517,6 +562,27 @@
       if (!text) return;
       s.notes.push({ phase: s.phase, text });
       commit("Handover note saved.");
+      return;
+    }
+    if (f.matches("[data-handoff]")) {
+      const l = s.loans.find((x) => x.num === Number(f.dataset.num) && !x.back);
+      const holder = form.get("holder");
+      const promised = form.get("promised") || null;
+      if (!l || !isPerson(holder) || (promised !== null && !isDue(promised))) {
+        q("[data-status]").textContent =
+          "Could not update this slip. Choose a person and a return time.";
+        return;
+      }
+      const moved = holder !== l.holder;
+      l.holder = holder;
+      l.promised = promised;
+      s.handoff = null;
+      const first = holder.split(" ")[0];
+      commit(
+        (moved ? "Handed to " + first : first + " still has it") +
+          (promised ? ", promised " + promised : "") +
+          ".",
+      );
       return;
     }
     if (!f.matches("[data-issue]")) return;
