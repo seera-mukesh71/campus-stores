@@ -134,6 +134,8 @@
     handoff: null, // slip number whose "Update holder / promise" form is open
     confirming: null, // slip number whose return-confirm panel is open
     draft: blankDraft(), // issue-form choices kept across re-renders
+    draftNote: "", // unsent handover note, kept when switching tabs
+    draftAbout: "", // slip number (as text) the unsent note is about, "" = general
     formError: "", // message shown inside the open form (role="alert")
     onlyOpen: true,
     notice: "Sample shift · All records are fictional.",
@@ -309,6 +311,19 @@
       "</div></form>"
     );
   }
+  // Handover notes written about one slip, shown where the work happens.
+  const notesFor = (num) => s.notes.filter((n) => n.loanNum === num);
+  const noteLines = (num) =>
+    notesFor(num)
+      .map(
+        (n) =>
+          '<small class="slipnote">Handover note (' +
+          esc(shifts[n.phase].time) +
+          "): " +
+          esc(n.text) +
+          "</small>",
+      )
+      .join("");
   function loanTitle(l) {
     const a = getAsset(l.asset);
     return "L-" + l.num + " · " + a.id + " · " + a.model + " · bin " + a.bin;
@@ -385,7 +400,9 @@
       esc(type) +
       "</strong><small>" +
       esc(text) +
-      '</small></div><div class="rowend">' +
+      "</small>" +
+      (loan ? noteLines(loan.num) : "") +
+      '</div><div class="rowend">' +
       tag +
       "</div></li>"
     );
@@ -651,6 +668,7 @@
         loanLines(l)
           .map((x) => "<small>" + esc(x) + "</small>")
           .join("") +
+        noteLines(l.num) +
         '</div><div class="rowend">' +
         badge(text, kind) +
         (l.back
@@ -689,19 +707,47 @@
         "I brought the projector and speaker. Leela Das has our adapter. She’ll be at the counter at 9 am tomorrow.",
       ]);
     for (const n of s.notes)
-      entries.push([shifts[n.phase].time, "Counter handover", n.text]);
-    for (const [t, author, body] of entries.slice().reverse())
+      entries.push([shifts[n.phase].time, "Counter handover", n.text, n.loanNum]);
+    for (const [t, author, body, loanNum] of entries.slice().reverse()) {
+      const l = loanNum ? s.loans.find((x) => x.num === loanNum) : null;
       html +=
         '<article class="record"><small>' +
         esc(t) +
         "</small><h3>" +
         esc(author) +
-        "</h3><p>" +
+        "</h3>" +
+        (l
+          ? badge("About L-" + l.num + " · " + l.asset + " · " + getAsset(l.asset).model)
+          : "") +
+        "<p>" +
         esc(body) +
         "</p></article>";
+    }
+    const open = s.loans.filter((l) => !l.back);
     return (
       html +
-      '<form data-note><div class="form"><label class="full"><span>Note for the next shift</span><textarea name="note" rows="2" maxlength="400" required></textarea></label></div><button type="submit">Add handover note</button></form>'
+      '<form data-note><div class="form"><label class="full"><span>About</span><select name="about">' +
+      opts(
+        [["", "General note"]].concat(
+          open.map((l) => [
+            String(l.num),
+            "L-" +
+              l.num +
+              " · " +
+              l.asset +
+              " · " +
+              getAsset(l.asset).model +
+              " · with " +
+              l.holder,
+          ]),
+        ),
+        s.draftAbout,
+      ) +
+      '</select></label><label class="full"><span>Note for the next shift</span><textarea name="note" rows="2" maxlength="400">' +
+      esc(s.draftNote) +
+      "</textarea></label></div>" +
+      formError() +
+      '<button type="submit">Add handover note</button></form>'
     );
   }
   const screens = {
@@ -832,7 +878,16 @@
     }
     commit();
   });
+  // Keep the unsent note while the attendant moves between tabs.
+  root.addEventListener("input", (e) => {
+    if (e.target.matches('form[data-note] textarea[name="note"]'))
+      s.draftNote = e.target.value;
+  });
   root.addEventListener("change", (e) => {
+    if (e.target.matches('form[data-note] select[name="about"]')) {
+      s.draftAbout = e.target.value;
+      return;
+    }
     if (e.target.matches("[data-filter]")) {
       s.filter = e.target.value;
       commit();
@@ -862,10 +917,21 @@
     const f = e.target;
     const form = new FormData(f);
     if (f.matches("[data-note]")) {
-      const text = String(form.get("note")).trim();
-      if (!text) return;
-      s.notes.push({ phase: s.phase, text, loanNum: null });
-      commit("Handover note saved.");
+      const text = String(form.get("note") || "").trim();
+      if (!text) return fail("Note is empty.");
+      const about = form.get("about") || "";
+      const l = about
+        ? s.loans.find((x) => x.num === Number(about) && !x.back)
+        : null;
+      if (about && !l) return fail("That slip is no longer open. Choose again.");
+      s.notes.push({ phase: s.phase, text, loanNum: l ? l.num : null });
+      s.draftNote = "";
+      s.draftAbout = "";
+      commit(
+        "Handover note saved" +
+          (l ? " on L-" + l.num + " · " + l.asset : "") +
+          ".",
+      );
       return;
     }
     if (f.matches("[data-return]")) {

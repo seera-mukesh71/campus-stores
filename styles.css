@@ -309,6 +309,13 @@ body > main {
   font-size: 13px;
   line-height: 1.5;
 }
+#campus-stores .row small.slipnote {
+  color: var(--memotxt);
+  background: var(--memo);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-top: 3px;
+}
 #campus-stores .formerror {
   color: var(--mark);
   font-weight: 600;
