@@ -102,6 +102,11 @@
     ["Loan register", "book-open"],
     ["Desk book", "messages-square"],
   ];
+  // Loan shape (v2):
+  //   who        – person who collected it at the counter (never changes)
+  //   holder     – person who physically has it now
+  //   promised   – promised-return label when it differs from `due`, else null
+  //   returnedBy / returnedAt – filled in when the slip is closed
   const original = () => ({
     version: 1,
     tab: "Requests",
@@ -116,6 +121,10 @@
         who: "Tara Shah",
         due: "Sat 10 am",
         back: false,
+        holder: "Tara Shah",
+        promised: null,
+        returnedBy: null,
+        returnedAt: null,
       },
     ],
     notes: [],
@@ -439,6 +448,8 @@
         const l = s.loans.find((l) => l.num === Number(v));
         if (!l || l.back) return;
         l.back = true;
+        l.returnedBy = l.holder;
+        l.returnedAt = shifts[s.phase].time;
         s.notice = l.asset + " returned to stock. Slip L-" + l.num + " closed.";
         break;
       }
@@ -484,8 +495,19 @@
         "The approved quantity of this equipment type is already on loan.";
       return;
     }
-    const num = Math.max(...s.loans.map((l) => l.num)) + 1;
-    s.loans.push({ num, req, asset, who, due, back: false });
+    const num = Math.max(400, ...s.loans.map((l) => l.num)) + 1;
+    s.loans.push({
+      num,
+      req,
+      asset,
+      who,
+      due,
+      back: false,
+      holder: who,
+      promised: null,
+      returnedBy: null,
+      returnedAt: null,
+    });
     s.editing = false;
     commit("Issued " + asset + " to " + who + " on slip L-" + num + ".");
   });
