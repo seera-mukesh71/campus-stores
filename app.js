@@ -136,6 +136,7 @@
     draft: blankDraft(), // issue-form choices kept across re-renders
     draftNote: "", // unsent handover note, kept when switching tabs
     draftAbout: "", // slip number (as text) the unsent note is about, "" = general
+    confirmRestart: false, // two-step restart is showing its confirm
     formError: "", // message shown inside the open form (role="alert")
     onlyOpen: true,
     notice: "Sample shift · All records are fictional.",
@@ -456,19 +457,31 @@
         filters.map((f) => [f, f]),
       ) +
       "</select></label></div>";
+    let shown = 0;
     for (const a of assets) {
-      const status = a.repair
-        ? "In repair"
-        : out(a.id)
-          ? "On loan"
-          : "On shelf";
+      const l = out(a.id);
+      const status = a.repair ? "In repair" : l ? "On loan" : "On shelf";
       if (s.filter !== "All items" && s.filter !== status) continue;
+      shown++;
+      const [t, kind] = l ? loanStatus(l) : [status, status === "On shelf" ? "good" : ""];
       html += row(
         a.id + " · " + a.type,
-        a.model + " · " + a.bin,
-        badge(status, status === "On shelf" ? "good" : ""),
+        a.model +
+          " · " +
+          a.bin +
+          (l
+            ? " · with " +
+              l.holder +
+              " · due " +
+              l.due +
+              (l.promised ? " · promised " + l.promised : "") +
+              " · L-" +
+              l.num
+            : ""),
+        badge(l ? "On loan · " + t : t, kind),
       );
     }
+    if (!shown) html += "<p>No units match this filter.</p>";
     return html;
   }
   // Units that may leave for request r right now: on the shelf, of an
@@ -778,28 +791,120 @@
           "</button>",
       )
       .join("");
+    // Re-rendering replaces the DOM, so remember what had focus and put it back.
+    const keep = focusKey(document.activeElement);
     q("[data-page]").innerHTML = screens[s.tab]();
     if (q("[data-filter]")) q("[data-filter]").value = s.filter;
-    q("[data-status]").textContent = s.notice;
+    q("[data-restartbox]").innerHTML = s.confirmRestart
+      ? "<span>This clears all slips and notes.</span>" +
+        btn("Confirm restart", "restart-confirm", "", "danger") +
+        btn("Cancel", "restart-cancel")
+      : btn("Restart sample shift", "restart");
+    q("[data-status]").textContent =
+      s.notice + (storageOk ? "" : " " + storageWarning);
+    const target = (nextFocus && q(nextFocus)) || (keep && q(keep));
+    nextFocus = null;
+    if (target && target !== document.activeElement) target.focus();
   }
+  // A selector that finds "the same" control after a re-render.
+  function focusKey(el) {
+    if (!el || el === document.body || !root.contains(el)) return null;
+    const form = el.closest("form");
+    const scope = form
+      ? "form" +
+        [...form.attributes]
+          .filter((a) => a.name.startsWith("data-"))
+          .map((a) => "[" + a.name + (a.value ? '="' + CSS.escape(a.value) + '"' : "") + "]")
+          .join("") +
+        " "
+      : "";
+    if (el.dataset.action)
+      return (
+        '[data-action="' +
+        CSS.escape(el.dataset.action) +
+        '"][data-val="' +
+        CSS.escape(el.dataset.val || "") +
+        '"]'
+      );
+    if (el.matches("[data-filter]")) return "[data-filter]";
+    if (el.name) return scope + '[name="' + CSS.escape(el.name) + '"]';
+    if (el.type === "submit" && form) return scope + 'button[type="submit"]';
+    return null;
+  }
+  const storageWarning =
+    "Browser storage is unavailable. Progress lasts for this visit.";
+  let storageOk = true;
+  let nextFocus = null; // selector to focus after the next paint
+  let lastSaved = null; // the stored JSON this tab last wrote or read
   function commit(msg) {
     if (msg) s.notice = msg;
-    paint();
     try {
-      localStorage.setItem(storageKey, JSON.stringify(s));
+      const raw = JSON.stringify(s);
+      localStorage.setItem(storageKey, raw);
+      lastSaved = raw;
+      storageOk = true;
     } catch {
-      q("[data-status]").textContent +=
-        " Browser storage is unavailable. Progress lasts for this visit.";
+      storageOk = false;
     }
+    paint();
   }
+  // Another tab may have saved since we last looked. Take its shared records
+  // (desk time, slips, notes) before acting, so neither tab overwrites the other.
+  function syncFromStorage() {
+    let raw;
+    try {
+      raw = localStorage.getItem(storageKey);
+    } catch {
+      return false;
+    }
+    if (raw === null || raw === lastSaved) return false;
+    let next;
+    try {
+      next = restore(JSON.parse(raw));
+    } catch {
+      return false;
+    }
+    if (!next) return false;
+    lastSaved = raw;
+    s.phase = next.phase;
+    s.loans = next.loans;
+    s.notes = next.notes;
+    const open = (n) => s.loans.some((l) => l.num === n && !l.back);
+    if (s.handoff !== null && !open(s.handoff)) s.handoff = null;
+    if (s.confirming !== null && !open(s.confirming)) s.confirming = null;
+    return true;
+  }
+  window.addEventListener("storage", (e) => {
+    if (e.key !== storageKey && e.key !== null) return;
+    if (e.key === null || e.newValue === null) {
+      // Storage cleared elsewhere: keep this tab's records and re-save them.
+      lastSaved = null;
+      return commit();
+    }
+    if (syncFromStorage()) {
+      s.notice = "Updated with changes from another tab.";
+      paint();
+    }
+  });
   root.addEventListener("click", (e) => {
     const b = e.target.closest("[data-action]");
     if (!b) return;
     const v = b.dataset.val;
+    syncFromStorage();
     s.formError = "";
     switch (b.dataset.action) {
       case "restart":
+        s.confirmRestart = true;
+        nextFocus = '[data-action="restart-cancel"]';
+        break;
+      case "restart-cancel":
+        s.confirmRestart = false;
+        nextFocus = '[data-action="restart"]';
+        break;
+      case "restart-confirm":
         s = original();
+        s.notice = "Sample shift restarted. All slips and notes cleared.";
+        nextFocus = '[data-action="restart"]';
         break;
       case "advance":
         if (s.phase < 2) s.phase++;
@@ -814,8 +919,14 @@
       case "handoff":
         s.handoff = Number(v);
         s.confirming = null;
+        nextFocus = 'form[data-handoff] select[name="holder"]';
+        break;
+      case "handoff-cancel":
+        nextFocus = '[data-action="handoff"][data-val="' + s.handoff + '"]';
+        s.handoff = null;
         break;
       case "return-cancel":
+        nextFocus = '[data-action="return"][data-val="' + s.confirming + '"]';
         s.confirming = null;
         break;
       case "undo": {
@@ -842,9 +953,6 @@
           " again.";
         break;
       }
-      case "handoff-cancel":
-        s.handoff = null;
-        break;
       case "close":
         s.selected = "";
         break;
@@ -854,6 +962,7 @@
       case "new":
         s.editing = true;
         s.draft = blankDraft();
+        nextFocus = 'form[data-issue] select[name="req"]';
         break;
       case "cancel":
         s.editing = false;
@@ -861,7 +970,10 @@
         break;
       case "issue-all": {
         const msg = issueAll();
-        if (msg) s.notice = msg;
+        if (msg) {
+          s.notice = msg;
+          nextFocus = '[data-action="new"]';
+        }
         break;
       }
       case "scope":
@@ -873,6 +985,7 @@
         if (!l || l.back) return;
         s.confirming = l.num;
         s.handoff = null;
+        nextFocus = 'form[data-return] select[name="by"]';
         break;
       }
     }
@@ -916,6 +1029,7 @@
     e.preventDefault();
     const f = e.target;
     const form = new FormData(f);
+    syncFromStorage();
     if (f.matches("[data-note]")) {
       const text = String(form.get("note") || "").trim();
       if (!text) return fail("Note is empty.");
@@ -927,6 +1041,7 @@
       s.notes.push({ phase: s.phase, text, loanNum: l ? l.num : null });
       s.draftNote = "";
       s.draftAbout = "";
+      nextFocus = 'form[data-note] textarea[name="note"]';
       commit(
         "Handover note saved" +
           (l ? " on L-" + l.num + " · " + l.asset : "") +
@@ -954,6 +1069,7 @@
       l.returnedBy = by;
       l.returnedAt = shifts[s.phase].time;
       s.confirming = null;
+      nextFocus = '[data-action="undo"][data-val="' + l.num + '"]';
       commit(
         a.id +
           " (" +
@@ -978,6 +1094,7 @@
       l.holder = holder;
       l.promised = promised;
       s.handoff = null;
+      nextFocus = '[data-action="handoff"][data-val="' + l.num + '"]';
       const first = holder.split(" ")[0];
       commit(
         (moved ? "Handed to " + first : first + " still has it") +
@@ -1021,6 +1138,7 @@
     const num = issueLoan(r, unit, who, due);
     s.editing = false;
     s.draft = blankDraft();
+    nextFocus = '[data-action="new"]';
     commit("Issued " + asset + " to " + who + " on slip L-" + num + ".");
   });
   // Turn a v1 saved shift into v2 shape. Validation happens afterwards in restore().
@@ -1136,14 +1254,20 @@
   function load() {
     let raw, migrated = false;
     try {
+      // Probe writing too: some private modes allow reads but refuse writes.
+      localStorage.setItem(storageKey + ".probe", "1");
+      localStorage.removeItem(storageKey + ".probe");
       raw = localStorage.getItem(storageKey);
       if (raw === null) {
         raw = localStorage.getItem(legacyKey);
         migrated = raw !== null;
       }
     } catch {
-      return; // Storage unavailable: keep the fresh shift.
+      storageOk = false; // Warn now, not only after the first action.
+      paint();
+      return;
     }
+    if (!migrated) lastSaved = raw;
     if (raw === null) return;
     let d;
     try {

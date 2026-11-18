@@ -390,6 +390,31 @@ body > main {
   font-size: 12px;
   background: transparent;
 }
+#campus-stores .restartbox {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+#campus-stores .statusbar button.danger {
+  background: var(--mark);
+  color: var(--paper);
+  border-color: var(--mark);
+}
+/* Phones: every control at least 44px tall so it can be hit with a thumb. */
+@media (max-width: 480px) {
+  #campus-stores :is(button, select, textarea, summary),
+  #campus-stores input:not([type="checkbox"]) {
+    min-height: 44px;
+  }
+  #campus-stores .form label.check {
+    min-height: 44px;
+  }
+  #campus-stores .form label.check input {
+    width: 24px;
+    height: 24px;
+  }
+}
 @container (max-width:650px) {
   #campus-stores .shell {
     grid-template-columns: minmax(0, 1fr);
