@@ -301,6 +301,14 @@ body > main {
 #campus-stores .form label.check span {
   margin: 0;
 }
+#campus-stores .memo {
+  background: var(--memo);
+  color: var(--memotxt);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}
 #campus-stores .formerror {
   color: var(--mark);
   font-weight: 600;

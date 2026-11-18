@@ -103,6 +103,7 @@
     ["Loan register", "book-open"],
     ["Desk book", "messages-square"],
   ];
+  const blankDraft = () => ({ req: "", asset: "", who: "", due: "" });
   // Loan shape (v2):
   //   who        – person who collected it at the counter (never changes)
   //   holder     – person who physically has it now
@@ -132,6 +133,7 @@
     editing: false,
     handoff: null, // slip number whose "Update holder / promise" form is open
     confirming: null, // slip number whose return-confirm panel is open
+    draft: blankDraft(), // issue-form choices kept across re-renders
     formError: "", // message shown inside the open form (role="alert")
     onlyOpen: true,
     notice: "Sample shift · All records are fictional.",
@@ -450,6 +452,87 @@
     }
     return html;
   }
+  // Units that may leave for request r right now: on the shelf, of an
+  // approved type, and that type not already out on this request.
+  function unitsFor(r) {
+    return assets.filter(
+      (a) =>
+        !a.repair &&
+        !out(a.id) &&
+        (!r ||
+          (r.items.includes(a.type) &&
+            !s.loans.some(
+              (l) =>
+                l.req === r.id && !l.back && getAsset(l.asset).type === a.type,
+            ))),
+    );
+  }
+  // Approved types on r that have never been issued.
+  const remainingFor = (r) =>
+    itemStates(r)
+      .filter((x) => !x.loan)
+      .map((x) => x.type);
+  // Return-by choices: never later than the request allows.
+  const duesFor = (r) =>
+    r ? dueLabels.filter((d) => dueMinutes(d) <= dueMinutes(r.due)) : dueLabels;
+  function issueForm() {
+    const d = s.draft;
+    const r = getReq(d.req);
+    const select = (label, key, options, selected) =>
+      "<label><span>" +
+      label +
+      '</span><select name="' +
+      key +
+      '"><option value="">Select…</option>' +
+      opts(options, selected) +
+      "</select></label>";
+    const units = unitsFor(r);
+    let html =
+      '<form data-issue><div class="form">' +
+      select(
+        "Approved request",
+        "req",
+        requests.map((x) => [x.id, x.id + " · " + x.club + " · " + x.event]),
+        d.req,
+      );
+    if (r) {
+      const left = remainingFor(r);
+      html +=
+        '<div class="full memo"><b>Request note:</b> ' +
+        esc(r.note) +
+        "<br /><b>Still to issue:</b> " +
+        esc(left.length ? left.join(", ") : "nothing — every approved item has a slip") +
+        "<br /><b>Return by:</b> " +
+        esc(r.due) +
+        "</div>";
+    }
+    html +=
+      select(
+        "Unit leaving the desk",
+        "asset",
+        units.map((a) => [
+          a.id,
+          a.id + " · " + a.type + " · " + a.model + " · bin " + a.bin,
+        ]),
+        d.asset,
+      ) +
+      select(
+        "Collected by",
+        "who",
+        people.map((p) => [p, p]),
+        d.who,
+      ) +
+      select(
+        "Return by",
+        "due",
+        duesFor(r).map((x) => [x, x]),
+        d.due,
+      ) +
+      "</div>" +
+      formError() +
+      '<div class="buttons"><button type="submit" class="primary">Save issue slip</button></div></form>';
+    return html;
+  }
   function register() {
     let html = head(
       "Loan register",
@@ -458,42 +541,7 @@
         ? btn("Cancel", "cancel")
         : btn("New issue slip", "new", "", "primary"),
     );
-    if (s.editing) {
-      const available = assets.filter((a) => !a.repair && !out(a.id));
-      const select = (label, key, options) =>
-        "<label><span>" +
-        label +
-        '</span><select name="' +
-        key +
-        '" required><option value="">Select…</option>' +
-        opts(options) +
-        "</select></label>";
-      return (
-        html +
-        '<form data-issue><div class="form">' +
-        select(
-          "Approved request",
-          "req",
-          requests.map((r) => [r.id, r.id + " · " + r.club]),
-        ) +
-        select(
-          "Unit leaving the desk",
-          "asset",
-          available.map((a) => [a.id, a.id + " · " + a.type]),
-        ) +
-        select(
-          "Collected by",
-          "who",
-          people.map((p) => [p, p]),
-        ) +
-        select(
-          "Return by",
-          "due",
-          dueLabels.map((d) => [d, d]),
-        ) +
-        '</div><button type="submit" class="primary">Save issue slip</button></form>'
-      );
-    }
+    if (s.editing) return html + issueForm();
     html +=
       '<div class="buttons">' +
       ["Outstanding", "All slips"]
@@ -683,9 +731,11 @@
         break;
       case "new":
         s.editing = true;
+        s.draft = blankDraft();
         break;
       case "cancel":
         s.editing = false;
+        s.draft = blankDraft();
         break;
       case "scope":
         s.onlyOpen = v === "0";
@@ -705,6 +755,20 @@
     if (e.target.matches("[data-filter]")) {
       s.filter = e.target.value;
       commit();
+      return;
+    }
+    // Issue form: remember each choice; picking a request narrows the units
+    // and sets Return by to the request's own return time.
+    const name = e.target.name;
+    if (e.target.closest("form[data-issue]") && Object.hasOwn(s.draft, name)) {
+      s.draft[name] = e.target.value;
+      if (name === "req") {
+        const r = getReq(e.target.value);
+        s.draft.asset = "";
+        s.draft.due = r ? r.due : "";
+      }
+      s.formError = "";
+      paint();
     }
   });
   // Show a validation problem inside the open form and in the status bar.
