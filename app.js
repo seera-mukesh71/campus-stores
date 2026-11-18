@@ -265,7 +265,9 @@
         ),
         l.promised || "",
       ) +
-      '</select></label></div><div class="buttons"><button type="submit" class="primary">Save holder / promise</button>' +
+      "</select></label></div>" +
+      formError() +
+      '<div class="buttons"><button type="submit" class="primary">Save holder / promise</button>' +
       btn("Cancel", "handoff-cancel") +
       "</div></form>"
     );
@@ -902,11 +904,10 @@
       const l = s.loans.find((x) => x.num === Number(f.dataset.num) && !x.back);
       const holder = form.get("holder");
       const promised = form.get("promised") || null;
-      if (!l || !isPerson(holder) || (promised !== null && !isDue(promised))) {
-        q("[data-status]").textContent =
-          "Could not update this slip. Choose a person and a return time.";
-        return;
-      }
+      if (!l || !isPerson(holder) || (promised !== null && !isDue(promised)))
+        return fail(
+          "Could not update this slip. Choose a person and a return time.",
+        );
       const moved = holder !== l.holder;
       l.holder = holder;
       l.promised = promised;
@@ -925,22 +926,32 @@
     );
     const unit = getAsset(asset),
       r = getReq(req);
-    if (!r || !unit || unit.repair || out(asset) || !people.includes(who))
-      return;
-    if (!r.items.includes(unit.type)) {
-      q("[data-status]").textContent =
-        "This equipment type is outside the approved request. Choose an approved unit.";
-      return;
-    }
+    // Every refusal says why, inside the form and in the status bar.
+    if (!r) return fail("Choose the approved request first.");
+    if (!unit) return fail("Choose the unit leaving the desk.");
+    if (unit.repair)
+      return fail(unit.id + " is in repair and cannot be issued.");
+    if (out(asset)) return fail(unit.id + " is already on another slip.");
+    if (!isPerson(who)) return fail("Choose who is collecting.");
+    if (!isDue(due)) return fail("Choose a return time.");
+    if (dueMinutes(due) > dueMinutes(r.due))
+      return fail(
+        "Return by cannot be later than the request allows (" +
+          r.due +
+          "). Record a later promise with Update holder / promise.",
+      );
+    if (!r.items.includes(unit.type))
+      return fail(
+        "This equipment type is outside the approved request. Choose an approved unit.",
+      );
     if (
       s.loans.some(
         (l) => l.req === req && !l.back && getAsset(l.asset).type === unit.type,
       )
-    ) {
-      q("[data-status]").textContent =
-        "The approved quantity of this equipment type is already on loan.";
-      return;
-    }
+    )
+      return fail(
+        "The approved quantity of this equipment type is already on loan.",
+      );
     const num = issueLoan(r, unit, who, due);
     s.editing = false;
     s.draft = blankDraft();
