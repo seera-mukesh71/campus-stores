@@ -64,25 +64,38 @@
     "Tara Shah",
     "Dev Menon",
   ];
+  // Desk time is counted in minutes since Friday 00:00 so "late" can be computed.
   const shifts = [
     {
       time: "Friday · 3:45 pm",
+      minutes: 945,
       title: "Pickup at the counter",
       text: "Kabir is here for the Film Society screening. The film starts at four. Can he leave with everything he needs?",
       next: "Move to return time",
     },
     {
       time: "Friday · 7:30 pm",
+      minutes: 1170,
       title: "The kit comes back in pieces",
       text: "Kabir has brought back the projector and speaker. “Leela still has the adapter. She’ll drop it off tomorrow at nine.” Take the return and hand over to the morning shift.",
       next: "Move to next morning",
     },
     {
       time: "Saturday · 9:00 am",
+      minutes: 1980,
       title: "Morning shift",
       text: "You’ve just taken over. Leela walks in with an adapter. Work out what was outstanding from the screening and close the loan for the right item.",
     },
   ];
+  // Every return-by label the desk uses, in minutes since Friday 00:00.
+  const dueTimes = {
+    "Fri 8 pm": 1200,
+    "Sat 9 am": 1980,
+    "Sat 10 am": 2040,
+    "Sat noon": 2160,
+  };
+  const dueLabels = Object.keys(dueTimes);
+  const filters = ["All items", "On shelf", "On loan", "In repair"];
   const pages = [
     ["Requests", "clipboard-list"],
     ["Inventory", "package"],
@@ -114,6 +127,22 @@
   const getAsset = (id) => assets.find((x) => x.id === id);
   const getReq = (id) => requests.find((x) => x.id === id);
   const out = (id) => s.loans.find((l) => l.asset === id && !l.back);
+  const isDue = (x) => typeof x === "string" && Object.hasOwn(dueTimes, x);
+  const nowMinutes = (phase = s.phase) => shifts[phase].minutes;
+  const dueMinutes = (label) => (isDue(label) ? dueTimes[label] : NaN);
+  const clockMinutes = (label) => {
+    const sh = shifts.find((x) => x.time === label);
+    return sh ? sh.minutes : NaN;
+  };
+  // Open and past the time it should be back (the promise, if one was made).
+  // Exactly on time is "due now", not overdue.
+  const isOverdue = (loan) =>
+    !loan.back && nowMinutes() > dueMinutes(loan.promised || loan.due);
+  // Late against the ORIGINAL due time: at return, or now if still open.
+  const wasLate = (loan) => {
+    const end = loan.back ? clockMinutes(loan.returnedAt) : nowMinutes();
+    return end > dueMinutes(loan.due);
+  };
   const esc = (x) =>
     String(x).replace(
       /[&<>"']/g,
@@ -202,7 +231,7 @@
     html +=
       '<div class="buttons"><label>Show <select data-filter>' +
       opts(
-        ["All items", "On shelf", "On loan", "In repair"].map((f) => [f, f]),
+        filters.map((f) => [f, f]),
       ) +
       "</select></label></div>";
     for (const a of assets) {
@@ -259,7 +288,7 @@
         select(
           "Return by",
           "due",
-          ["Fri 8 pm", "Sat 9 am", "Sat 10 am", "Sat noon"].map((d) => [d, d]),
+          dueLabels.map((d) => [d, d]),
         ) +
         '</div><button type="submit" class="primary">Save issue slip</button></form>'
       );
