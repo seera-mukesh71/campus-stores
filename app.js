@@ -267,6 +267,83 @@
     const a = getAsset(l.asset);
     return "L-" + l.num + " · " + a.id + " · " + a.model + " · bin " + a.bin;
   }
+  // For each approved item type on a request, the latest slip for that type
+  // (or null if it was never issued).
+  function itemStates(r) {
+    return r.items.map((type) => {
+      const slips = s.loans.filter(
+        (l) => l.req === r.id && getAsset(l.asset).type === type,
+      );
+      const loan = slips.length
+        ? slips.reduce((a, b) => (b.num > a.num ? b : a))
+        : null;
+      return { type, loan };
+    });
+  }
+  // "2 of 3 returned · 1 overdue (USB-C → HDMI adapter, with Leela Das)"
+  function fulfilment(r, detail = true) {
+    const st = itemStates(r);
+    const returned = st.filter((x) => x.loan && x.loan.back).length;
+    const notIssued = st.filter((x) => !x.loan).length;
+    const open = st.filter((x) => x.loan && !x.loan.back);
+    const late = open.filter((x) => loanStatus(x.loan)[0] === "Overdue");
+    const parts = [returned + " of " + st.length + " returned"];
+    if (notIssued) parts.push(notIssued + " not issued");
+    if (open.length > late.length) parts.push(open.length - late.length + " out");
+    if (late.length)
+      parts.push(
+        late.length +
+          " overdue" +
+          (detail
+            ? " (" +
+              late.map((x) => x.type + ", with " + x.loan.holder).join("; ") +
+              ")"
+            : ""),
+      );
+    return parts.join(" · ");
+  }
+  // One line per approved item: Not issued / Out — with X, due Y / Returned by X.
+  function itemLine({ type, loan }) {
+    let text, tag;
+    if (!loan) {
+      text = "Not issued";
+      tag = badge("Not issued");
+    } else if (!loan.back) {
+      const [t, kind] = loanStatus(loan);
+      text =
+        "Out — with " +
+        loan.holder +
+        ", due " +
+        loan.due +
+        (loan.promised ? " · promised " + loan.promised : "") +
+        " · L-" +
+        loan.num +
+        " · " +
+        loan.asset;
+      tag = badge(t, kind);
+    } else {
+      text =
+        (loan.returnedBy
+          ? "Returned by " + loan.returnedBy + ", " + loan.returnedAt
+          : "Returned") +
+        " · L-" +
+        loan.num +
+        " · " +
+        loan.asset;
+      tag = badge(...loanStatus(loan));
+    }
+    return (
+      '<li class="row" data-item="' +
+      esc(type) +
+      '"><div><strong>' +
+      esc(type) +
+      "</strong><small>" +
+      esc(text) +
+      '</small></div><div class="rowend">' +
+      tag +
+      "</div></li>"
+    );
+  }
   function requestPage() {
     let html = head(
       "Approved requests",
@@ -277,19 +354,21 @@
       html +=
         btn("Back to list", "close") +
         '<div class="record"><small>' +
-        r.id +
+        esc(r.id) +
         " · Approved</small><h3>" +
-        r.event +
+        esc(r.event) +
         "</h3><p>" +
-        r.club +
+        esc(r.club) +
         " · Filed by " +
-        r.owner +
+        esc(r.owner) +
         "</p><p><b>Return by</b> " +
-        r.due +
-        "</p><p><b>Approved equipment</b></p><ul>" +
-        r.items.map((x) => "<li>" + x + "</li>").join("") +
+        esc(r.due) +
+        '</p><p class="summary" data-summary><b>' +
+        esc(fulfilment(r)) +
+        "</b></p><p><b>Approved equipment</b></p><ul class=\"items\">" +
+        itemStates(r).map(itemLine).join("") +
         "</ul><p>" +
-        r.note +
+        esc(r.note) +
         "</p></div>";
     } else
       html += requests

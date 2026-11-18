@@ -279,6 +279,14 @@ body > main {
   align-items: center;
   justify-content: flex-end;
 }
+#campus-stores .items {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+}
+#campus-stores .summary {
+  margin-top: 8px;
+}
 #campus-stores .inlineform {
   border-left: 3px solid var(--sel);
   background: var(--desk);
