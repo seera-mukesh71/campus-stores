@@ -1,5 +1,6 @@
 (() => {
-  const storageKey = "campus-stores.shift.v1";
+  const storageKey = "campus-stores.shift.v2";
+  const legacyKey = "campus-stores.shift.v1";
   const root = document.getElementById("campus-stores");
   const q = (selector) => root.querySelector(selector);
   const requests = [
@@ -108,7 +109,7 @@
   //   promised   – promised-return label when it differs from `due`, else null
   //   returnedBy / returnedAt – filled in when the slip is closed
   const original = () => ({
-    version: 1,
+    version: 2,
     tab: "Requests",
     phase: 0,
     selected: "",
@@ -137,6 +138,8 @@
   const getReq = (id) => requests.find((x) => x.id === id);
   const out = (id) => s.loans.find((l) => l.asset === id && !l.back);
   const isDue = (x) => typeof x === "string" && Object.hasOwn(dueTimes, x);
+  const isPerson = (x) => people.includes(x);
+  const isClock = (x) => shifts.some((sh) => sh.time === x);
   const nowMinutes = (phase = s.phase) => shifts[phase].minutes;
   const dueMinutes = (label) => (isDue(label) ? dueTimes[label] : NaN);
   const clockMinutes = (label) => {
@@ -511,37 +514,140 @@
     s.editing = false;
     commit("Issued " + asset + " to " + who + " on slip L-" + num + ".");
   });
-  function restore(d) {
+  // Turn a v1 saved shift into v2 shape. Validation happens afterwards in restore().
+  function migrateV1(d) {
     if (
       !d ||
+      typeof d !== "object" ||
       d.version !== 1 ||
+      !Array.isArray(d.loans) ||
+      !Array.isArray(d.notes)
+    )
+      return null;
+    return {
+      ...d,
+      version: 2,
+      loans: d.loans.map((l) =>
+        l && typeof l === "object"
+          ? {
+              ...l,
+              holder: l.who,
+              promised: null,
+              returnedBy: null,
+              returnedAt: null,
+            }
+          : l,
+      ),
+      notes: d.notes.map((n) =>
+        n && typeof n === "object" ? { ...n, loanNum: null } : n,
+      ),
+    };
+  }
+  // Strictly check a saved v2 shift. Returns a clean state built only from
+  // known keys, or null if anything is wrong.
+  function restore(d) {
+    const isObj = (x) => !!x && typeof x === "object" && !Array.isArray(x);
+    const orNull = (x, ok) => x === null || ok(x);
+    const validLoan = (l) =>
+      isObj(l) &&
+      Number.isInteger(l.num) &&
+      typeof l.req === "string" &&
+      !!getReq(l.req) &&
+      typeof l.asset === "string" &&
+      !!getAsset(l.asset) &&
+      isPerson(l.who) &&
+      isDue(l.due) &&
+      typeof l.back === "boolean" &&
+      isPerson(l.holder) &&
+      orNull(l.promised, isDue) &&
+      orNull(l.returnedBy, isPerson) &&
+      orNull(l.returnedAt, isClock);
+    if (
+      !isObj(d) ||
+      d.version !== 2 ||
+      typeof d.tab !== "string" ||
       !Object.hasOwn(screens, d.tab) ||
-      !shifts[d.phase] ||
-      (d.selected && !getReq(d.selected)) ||
-      !Array.isArray(d.notes) ||
-      !d.notes.every(
-        (n) => n && shifts[n.phase] && typeof n.text === "string",
-      ) ||
+      !Number.isInteger(d.phase) ||
+      d.phase < 0 ||
+      d.phase > 2 ||
+      typeof d.selected !== "string" ||
+      (d.selected !== "" && !getReq(d.selected)) ||
+      !filters.includes(d.filter) ||
+      typeof d.editing !== "boolean" ||
+      typeof d.onlyOpen !== "boolean" ||
+      typeof d.notice !== "string" ||
       !Array.isArray(d.loans) ||
       !d.loans.length ||
-      !d.loans.every(
-        (l) =>
-          l && getReq(l.req) && getAsset(l.asset) && Number.isInteger(l.num),
-      )
+      !d.loans.every(validLoan) ||
+      !Array.isArray(d.notes)
     )
-      return;
-    s = {
+      return null;
+    const nums = d.loans.map((l) => l.num);
+    if (new Set(nums).size !== nums.length) return null;
+    const openAssets = d.loans.filter((l) => !l.back).map((l) => l.asset);
+    if (new Set(openAssets).size !== openAssets.length) return null;
+    const validNote = (n) =>
+      isObj(n) &&
+      Number.isInteger(n.phase) &&
+      n.phase >= 0 &&
+      n.phase <= 2 &&
+      typeof n.text === "string" &&
+      orNull(n.loanNum, (k) => nums.includes(k));
+    if (!d.notes.every(validNote)) return null;
+    return {
       ...original(),
-      ...d,
-      loans: d.loans.map((l) => ({ ...l })),
-      notes: d.notes.map((n) => ({ ...n })),
+      version: 2,
+      tab: d.tab,
+      phase: d.phase,
+      selected: d.selected,
+      filter: d.filter,
+      editing: d.editing,
+      onlyOpen: d.onlyOpen,
+      notice: d.notice,
+      loans: d.loans.map((l) => ({
+        num: l.num,
+        req: l.req,
+        asset: l.asset,
+        who: l.who,
+        due: l.due,
+        back: l.back,
+        holder: l.holder,
+        promised: l.promised,
+        returnedBy: l.returnedBy,
+        returnedAt: l.returnedAt,
+      })),
+      notes: d.notes.map((n) => ({
+        phase: n.phase,
+        text: n.text,
+        loanNum: n.loanNum,
+      })),
     };
-    paint();
+  }
+  // Load v2; if there is none, migrate v1 once. Anything invalid → fresh shift.
+  function load() {
+    let raw, migrated = false;
+    try {
+      raw = localStorage.getItem(storageKey);
+      if (raw === null) {
+        raw = localStorage.getItem(legacyKey);
+        migrated = raw !== null;
+      }
+    } catch {
+      return; // Storage unavailable: keep the fresh shift.
+    }
+    if (raw === null) return;
+    let d;
+    try {
+      d = JSON.parse(raw);
+    } catch {
+      return; // Corrupt JSON: keep the fresh shift.
+    }
+    const next = restore(migrated ? migrateV1(d) : d);
+    if (!next) return;
+    s = next;
+    if (migrated) commit("Saved shift updated to the new format.");
+    else paint();
   }
   paint();
-  try {
-    restore(JSON.parse(localStorage.getItem(storageKey)));
-  } catch {
-    // Keep the fresh shift when storage is unavailable or the saved data is invalid.
-  }
+  load();
 })();
